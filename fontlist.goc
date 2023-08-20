@@ -1,0 +1,195 @@
+/*
+ *      FONTLIST.GOC - prototype of a Geos font listing application
+ *
+ *      by Marcus Groeber, mgroeber@compuserve.com
+ *
+ */
+
+@include <stdapp.goh>
+#include <ansi\stdio.h>
+
+#define MAX_SAMPLE_LEN 512
+
+
+/*
+ * every application needs a process class that handles some of the
+ * most basic messages
+ */
+@class  FontListProcessClass, GenProcessClass;
+  @message void MSG_FONT_LIST_PROCESS_UPDATE();
+@endc
+
+@classdecl  FontListProcessClass, neverSaved;
+
+/*
+ ***************************************************************************
+ *		UI Objects
+ ***************************************************************************
+ */
+
+@start	AppResource;
+
+  /* declare the main application object */
+  @object GenApplicationClass FontListApp = {
+    GI_visMoniker = list { @FontListTextMoniker }
+    GI_comp = @FontListPrimary;         /* one main window, nothing else */
+    gcnList(MANUFACTURER_ID_GEOWORKS,GAGCNLT_WINDOWS) =
+      @FontListPrimary, @SampleDialog;
+    gcnList(MANUFACTURER_ID_GEOWORKS,GAGCNLT_SELF_LOAD_OPTIONS) =
+      @EditControl;
+  }
+
+  @visMoniker FontListTextMoniker = "Font Lister";
+
+@end	AppResource;
+
+@start  Interface;                      /* resource for misc UI objects */
+
+  @object GenPrimaryClass FontListPrimary  = {
+    GI_comp = @EditControl,
+              @SampleDialog,
+              @FontListText;            /* nothing fancy, just a window with
+                                           a text object */
+  }
+
+  @object GenTextClass FontListText = {
+    GI_attrs = @default | GA_READ_ONLY | GA_TARGETABLE;
+                                        /* can't modify text object */
+    GTXI_attrs = @default | GTA_INIT_SCROLLING;
+                                        /* always turn on scrollers */
+    GTXI_text = "";                     /* empty at start */
+
+    ATTR_GEN_TEXT_SELECTABLE;           /* user can select and QuickCopy */
+    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;   /* use up all space available */
+  }
+
+  @object GenEditControlClass EditControl = {
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
+    GII_visibility = GIV_POPUP;
+    ATTR_GEN_CONTROL_PROHIBIT_UI = GECF_UNDO|GECF_DELETE|GECF_CUT|GECF_PASTE;
+    ATTR_GEN_INTERACTION_GROUP_TYPE = (GIGT_EDIT_MENU);
+  }
+
+  @object GenInteractionClass SampleDialog = {
+    GI_visMoniker = 'L',"FontList";
+    GI_comp = @SampleText, @UpdateTrigger;
+    GII_visibility = GIV_DIALOG;
+    GII_type = GIT_COMMAND;
+    HINT_SEEK_MENU_BAR;
+  }
+
+  @object GenTextClass SampleText = {
+    GTXI_attrs = @default | GTA_INIT_SCROLLING;
+                                        /* always turn on scrollers */
+
+    GTXI_text = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG\rthe quick brown fox jumps over the lazy dog\rAVATAR 123 +;\x23 \x8A\x80\xA7 \xDB";
+
+    GTXI_maxLength = MAX_SAMPLE_LEN;
+
+    ATTR_GEN_TEXT_SELECTABLE;           /* user can select and QuickCopy */
+    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;   /* use up all space available */
+
+    HINT_MINIMUM_SIZE = {SST_AVG_CHAR_WIDTHS | 60, 0, 0};
+    HINT_INITIAL_SIZE = {SST_AVG_CHAR_WIDTHS | 60, 0, 0};
+  }
+
+  @object GenTriggerClass UpdateTrigger = {
+    GI_visMoniker = 'U',"Update List";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_FONT_LIST_PROCESS_UPDATE;
+    HINT_SEEK_REPLY_BAR;
+  }
+
+@end    Interface;
+
+/*
+ ***************************************************************************
+ *              Methods and procedures
+ ***************************************************************************
+ */
+
+/*
+ *      AppendLine appends the string in str[] and sets the font to the
+ *      passed font id and the point size to the value specified in ps.
+ */
+void AppendLine(char *str,FontID fid,sword ps)
+{
+    dword p1,p2;
+    WWFixed pswwf;
+
+    p1=@call FontListText::MSG_VIS_TEXT_GET_TEXT_SIZE();
+                                        /* get starting position of range */
+    @call FontListText::MSG_VIS_TEXT_APPEND_PTR(str,0);
+                                        /* append text of line */
+    p2=@call FontListText::MSG_VIS_TEXT_GET_TEXT_SIZE();
+                                        /* get end of range */
+    @call FontListText::MSG_VIS_TEXT_APPEND_PTR("\r",0);
+                                        /* add a newline */
+    @call FontListText::MSG_VIS_TEXT_SET_FONT_ID(fid,p2,p1);
+    *(WWFixedAsDWord *)&pswwf=MakeWWFixed(ps);
+    @call FontListText::MSG_VIS_TEXT_SET_POINT_SIZE(pswwf,p2,p1);
+                                        /* set font and point size */
+}
+
+@method FontListProcessClass, MSG_FONT_LIST_PROCESS_UPDATE
+{
+    word numFonts,i;
+    MemHandle h;
+    FontEnumStruct *fes;
+    char buf[80], sample[MAX_SAMPLE_LEN+1];
+
+    @call FontListText::MSG_VIS_TEXT_DELETE_ALL();
+
+    numFonts = GrEnumFonts(NULL,0,FEF_ALPHABETIZE|FEF_OUTLINES,0);
+                                        /* get number of matching fonts */
+
+    h = MemAlloc(sizeof(FontEnumStruct)*numFonts,HF_DYNAMIC,HAF_NO_ERR);
+    fes = MemLock(h);                   /* get pointer to memory block */
+
+    GrEnumFonts(fes,numFonts,FEF_ALPHABETIZE|FEF_OUTLINES,0);
+                                        /* get list of fonts into buffer */
+
+    @call SampleText::MSG_VIS_TEXT_GET_ALL_PTR(sample);
+
+    @call FontListText::MSG_META_SUSPEND();
+                                        /* don't update text object yet */
+    for(i=0; i<numFonts; i++)           /* process all fonts */
+    {
+      AppendLine("",FID_DTC_URW_SANS,12);
+      sprintf(buf,"%s [%04X]",fes[i].FES_name,fes[i].FES_ID);
+      AppendLine(buf,FID_DTC_URW_SANS,12);
+                                        /* add font name/id to list */
+      AppendLine(sample, fes[i].FES_ID,20);
+                                        /* add some sample text */
+    }
+    MemUnlock(h);
+    MemFree(h);                         /* release memory */
+
+    @call FontListText::MSG_META_UNSUSPEND();
+                                        /* now show what we have done */
+}
+
+/*
+ *      This method handler is called once at the start of the application.
+ *      It loads the font samples into the text window. All other processing
+ *      for resizing, scrolling and ending the application is performed
+ *      by Geos internally.
+ */
+@method FontListProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
+{
+    @callsuper();
+
+    @call FontListText::MSG_VIS_TEXT_CREATE_STORAGE(
+      VTSF_MULTIPLE_CHAR_ATTRS,
+      FALSE);                           /* we'll have multiple text fonts */
+
+    AppendLine(
+      "\r"
+        "Please use the Update List command to generate a font listing. "
+        "If you experience crashes with a large number of fonts, try reducing "
+        "the amount of sample text that is used.",
+      FID_DTC_URW_SANS,14);
+
+    @call FontListText::MSG_META_GRAB_TARGET_EXCL();
+                                        /* keystrokes go to text object */
+}
