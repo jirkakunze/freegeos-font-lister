@@ -6,7 +6,7 @@
  */
 
 @include <stdapp.goh>
-#include <ansi\stdio.h>
+#include <Ansi/stdio.h>
 #include <timer.h>
 
 #define MAX_SAMPLE_LEN 512
