@@ -7,9 +7,10 @@
 
 @include <stdapp.goh>
 #include <ansi\stdio.h>
+#include <timer.h>
 
 #define MAX_SAMPLE_LEN 512
-
+#define TEMP_FILE_NAME "Font List Buffer"
 
 /*
  * every application needs a process class that handles some of the
@@ -23,11 +24,11 @@
 
 /*
  ***************************************************************************
- *		UI Objects
+ *      UI Objects
  ***************************************************************************
  */
 
-@start	AppResource;
+@start  AppResource;
 
   /* declare the main application object */
   @object GenApplicationClass FontListApp = {
@@ -41,7 +42,7 @@
 
   @visMoniker FontListTextMoniker = "Font Lister";
 
-@end	AppResource;
+@end    AppResource;
 
 @start  Interface;                      /* resource for misc UI objects */
 
@@ -109,6 +110,24 @@
  */
 
 /*
+ *      Performs a speed test of the passed font by rendering the letters
+ *      A to Z into a bitmap and measuring the number of ticks. Because of
+ *      font caching, this is unreliable if run more than once.
+ */
+dword BenchmarkFont(FontID fid, GStateHandle gstate)
+{
+    char c;
+    dword t;
+
+    t = TimerGetCount();
+    GrSetFont(gstate, fid, MakeWWFixed(29)); /* unlikely to have bitmap */
+    for(c='A'; c<='Z'; c++) {
+        GrDrawText(gstate, 0, 0, &c, 1);
+    }
+    return (word)(TimerGetCount() - t);
+}
+
+/*
  *      AppendLine appends the string in str[] and sets the font to the
  *      passed font id and the point size to the value specified in ps.
  */
@@ -137,6 +156,9 @@ void AppendLine(char *str,FontID fid,sword ps)
     MemHandle h;
     FontEnumStruct *fes;
     char buf[80], sample[MAX_SAMPLE_LEN+1];
+    VMFileHandle vmf;
+    VMBlockHandle vmb;
+    GStateHandle gstate;
 
     @call FontListText::MSG_VIS_TEXT_DELETE_ALL();
 
@@ -149,19 +171,35 @@ void AppendLine(char *str,FontID fid,sword ps)
     GrEnumFonts(fes,numFonts,FEF_ALPHABETIZE|FEF_OUTLINES,0);
                                         /* get list of fonts into buffer */
 
+    /* Create temporary file holding bitmap */
+    FileSetStandardPath(SP_WASTE_BASKET);
+    vmf = VMOpen(TEMP_FILE_NAME, VMAF_FORCE_READ_WRITE,
+      VMO_CREATE_TRUNCATE, 0);          /* create temporary file for fonts */
+    vmb = GrCreateBitmap(BMF_MONO, 100, 100, vmf, 0, &gstate);
+
     @call SampleText::MSG_VIS_TEXT_GET_ALL_PTR(sample);
 
     @call FontListText::MSG_META_SUSPEND();
                                         /* don't update text object yet */
     for(i=0; i<numFonts; i++)           /* process all fonts */
     {
+      word t = BenchmarkFont(fes[i].FES_ID, gstate);
+
       AppendLine("",FID_DTC_URW_SANS,12);
-      sprintf(buf,"%s [%04X]",fes[i].FES_name,fes[i].FES_ID);
+      sprintf(buf,"%s [%04X] %d ms/char",
+        fes[i].FES_name, fes[i].FES_ID, (t*100/6));
       AppendLine(buf,FID_DTC_URW_SANS,12);
                                         /* add font name/id to list */
       AppendLine(sample, fes[i].FES_ID,20);
                                         /* add some sample text */
     }
+
+    /* Close and delete temporary file holding bitmap */
+    GrDestroyBitmap(gstate, BMD_KILL_DATA);
+    VMClose(vmf, FILE_NO_ERRORS);
+    FileSetStandardPath(SP_WASTE_BASKET);
+    FileDelete(TEMP_FILE_NAME);
+
     MemUnlock(h);
     MemFree(h);                         /* release memory */
 
